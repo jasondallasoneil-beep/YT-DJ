@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>YT/DJ — Dual Deck v0.3</title>
+<title>YT/DJ — Dual Deck v0.4</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=VT323&family=Major+Mono+Display&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -550,6 +550,87 @@
     letter-spacing: 0.1em;
   }
 
+  /* LOOPER */
+  .looper-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    background: #0d0d0d;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+  }
+  .looper-title {
+    font-family: 'Major Mono Display', monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-align: center;
+    color: var(--ink-dim);
+  }
+  .looper-btn {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    padding: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.15em;
+    cursor: pointer;
+    border-radius: 2px;
+    font-weight: 700;
+    transition: all 0.15s;
+  }
+  .looper-btn:hover { background: #252525; border-color: #3a3a3a; }
+  .looper-btn.recording {
+    background: var(--hot);
+    color: #000;
+    border-color: var(--hot);
+    animation: pulse-rec 0.8s infinite;
+  }
+  .looper-btn.playing {
+    background: var(--magenta);
+    color: #000;
+    border-color: var(--magenta);
+  }
+  @keyframes pulse-rec {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.6); }
+    50% { box-shadow: 0 0 0 6px rgba(255, 59, 48, 0); }
+  }
+  .looper-info {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'VT323', monospace;
+    font-size: 13px;
+    color: var(--ink-dim);
+    letter-spacing: 0.1em;
+  }
+  .looper-info .val { color: var(--amber); }
+  .looper-progress {
+    height: 4px;
+    background: #000;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .looper-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--magenta);
+    transition: width 0.05s linear;
+  }
+  .looper-clear {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--ink-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    padding: 4px;
+    cursor: pointer;
+    border-radius: 2px;
+    letter-spacing: 0.15em;
+  }
+  .looper-clear:hover { color: var(--hot); border-color: var(--hot); }
+
   /* center mixer */
   .mixer {
     background: var(--panel);
@@ -683,8 +764,8 @@
 
 <div class="header">
   <div>
-    <div class="logo">YT<span class="slash">/</span>DJ<span class="accent">.</span><span class="version">v0.3</span></div>
-    <div class="tagline">DUAL DECK · QUEUES · HOT CUES · SYNC · TAP BPM</div>
+    <div class="logo">YT<span class="slash">/</span>DJ<span class="accent">.</span><span class="version">v0.4</span></div>
+    <div class="tagline">DUAL DECK · QUEUES · HOT CUES · SYNC · TAP BPM · LOOPER</div>
   </div>
   <button class="help-toggle" id="helpToggle">SHOW KEYS</button>
 </div>
@@ -699,6 +780,7 @@
   <span class="group"><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> crossfade</span>
   <span class="group"><kbd>T</kbd> tap tempo</span>
   <span class="group"><kbd>S</kbd> sync</span>
+  <span class="group"><kbd>L</kbd> looper rec/play/stop</span>
   <span class="group">Queue: click row to load · ⇆ swap · ✕ delete</span>
 </div>
 
@@ -820,6 +902,19 @@
         <span>SYNC TARGET</span>
         <span id="syncTarget" style="color:var(--amber);">—</span>
       </div>
+    </div>
+
+    <div class="section-divider"></div>
+
+    <div class="looper-section">
+      <div class="looper-title">CUE LOOPER</div>
+      <button class="looper-btn" id="looperBtn">● REC</button>
+      <div class="looper-progress"><div class="looper-progress-fill" id="looperProgress"></div></div>
+      <div class="looper-info">
+        <span><span id="looperState">IDLE</span></span>
+        <span class="val" id="looperLength">—</span>
+      </div>
+      <button class="looper-clear" id="looperClear">CLEAR</button>
     </div>
 
     <div class="pitch-warning">
@@ -1057,13 +1152,30 @@
   });
 
   // ===== QUEUE =====
+  function fetchTitle(videoId, callback) {
+    // YouTube oEmbed - no API key needed, no auth, free
+    const url = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+    fetch(url)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => callback(data && data.title ? data.title : null))
+      .catch(() => callback(null));
+  }
+
   function addToQueue(deck, url) {
     url = url.trim();
     if (!url) return false;
     const id = extractVideoId(url);
     if (!id) return false;
-    queues[deck].push({ url, id });
+    const item = { url, id, title: null };
+    queues[deck].push(item);
     renderQueue(deck);
+    // fetch title async; re-render when it arrives
+    fetchTitle(id, (title) => {
+      if (title) {
+        item.title = title;
+        renderQueue(deck);
+      }
+    });
     return true;
   }
   function removeFromQueue(deck, idx) {
@@ -1099,9 +1211,10 @@
       const isPlaying = nowPlaying[deck] === item.url;
       const row = document.createElement('div');
       row.className = 'queue-item' + (isPlaying ? ' now-playing' : '');
+      const displayText = item.title || (item.id + ' · loading…');
       row.innerHTML = `
         <span class="num">${isPlaying ? '►' : (idx + 1)}</span>
-        <span class="url" title="${item.url}">${shortUrl(item.url)}</span>
+        <span class="url" title="${item.title ? item.title.replace(/"/g, '&quot;') + ' — ' + item.url : item.url}">${displayText}</span>
         <span class="actions">
           <button class="act-btn swap-btn" data-act="swap" title="Move to ${deck === 'A' ? 'B' : 'A'}">⇆</button>
           <button class="act-btn del-btn" data-act="del" title="Remove">✕</button>
@@ -1227,7 +1340,7 @@
     cues[deck][slot] = p.getCurrentTime();
     refreshCueButtons(deck);
   }
-  function jumpCue(deck, slot) {
+  function jumpCue(deck, slot, fromLooper = false) {
     const p = players[deck];
     const t = cues[deck][slot];
     if (!p || t == null) return;
@@ -1238,6 +1351,7 @@
       btn.style.outline = '2px solid var(--ink)';
       setTimeout(() => { btn.style.outline = ''; }, 150);
     }
+    if (!fromLooper) recordCueIfNeeded(deck, slot);
   }
   function refreshCueButtons(deck) {
     cues[deck].forEach((t, slot) => {
@@ -1334,6 +1448,149 @@
     }
   }
 
+  // ===== LOOPER =====
+  // States: idle -> recording -> playing -> idle
+  const looper = {
+    state: 'idle',           // 'idle' | 'recording' | 'playing'
+    events: [],              // [{ time: ms-from-start, deck, slot }]
+    recordStart: 0,          // performance.now() when recording began
+    loopLength: 0,           // ms, snapped to whole beat
+    playStart: 0,            // performance.now() when playback (re)started
+    nextEventIdx: 0,         // index into events for current pass
+    rafId: null
+  };
+
+  function getActiveBpm() {
+    // Whichever deck has BPM; if both, prefer armed
+    if (bpm[activeDeck] != null) return bpm[activeDeck] * speed[activeDeck];
+    const other = activeDeck === 'A' ? 'B' : 'A';
+    if (bpm[other] != null) return bpm[other] * speed[other];
+    return null;
+  }
+
+  function snapToBeat(durationMs, effectiveBpm) {
+    if (!effectiveBpm || effectiveBpm <= 0) return durationMs;
+    const beatMs = 60000 / effectiveBpm;
+    const beats = Math.max(1, Math.round(durationMs / beatMs));
+    return beats * beatMs;
+  }
+
+  function looperRecord_start() {
+    looper.state = 'recording';
+    looper.events = [];
+    looper.recordStart = performance.now();
+    looper.loopLength = 0;
+    refreshLooperUI();
+  }
+
+  function looperRecord_stop() {
+    const rawLength = performance.now() - looper.recordStart;
+    const effBpm = getActiveBpm();
+    looper.loopLength = effBpm
+      ? snapToBeat(rawLength, effBpm)
+      : Math.max(rawLength, 500);
+    if (looper.events.length === 0) {
+      // nothing recorded; just go back to idle
+      looper.state = 'idle';
+      looper.loopLength = 0;
+      refreshLooperUI();
+      return;
+    }
+    looper.state = 'playing';
+    looper.playStart = performance.now();
+    looper.nextEventIdx = 0;
+    refreshLooperUI();
+    runLooperPlayback();
+  }
+
+  function looperPlay_stop() {
+    looper.state = 'idle';
+    if (looper.rafId) cancelAnimationFrame(looper.rafId);
+    looper.rafId = null;
+    refreshLooperUI();
+  }
+
+  function looperToggle() {
+    if (looper.state === 'idle') looperRecord_start();
+    else if (looper.state === 'recording') looperRecord_stop();
+    else if (looper.state === 'playing') looperPlay_stop();
+  }
+
+  function looperClear() {
+    looper.events = [];
+    looper.loopLength = 0;
+    looperPlay_stop();
+  }
+
+  function recordCueIfNeeded(deck, slot) {
+    if (looper.state !== 'recording') return;
+    looper.events.push({
+      time: performance.now() - looper.recordStart,
+      deck, slot
+    });
+  }
+
+  function runLooperPlayback() {
+    const tick = () => {
+      if (looper.state !== 'playing' || looper.loopLength <= 0) return;
+      const elapsed = performance.now() - looper.playStart;
+      // fire any events whose time has come this pass
+      while (
+        looper.nextEventIdx < looper.events.length &&
+        looper.events[looper.nextEventIdx].time <= elapsed
+      ) {
+        const ev = looper.events[looper.nextEventIdx];
+        jumpCue(ev.deck, ev.slot, true);
+        looper.nextEventIdx++;
+      }
+      // wrap loop
+      if (elapsed >= looper.loopLength) {
+        looper.playStart += looper.loopLength;
+        looper.nextEventIdx = 0;
+      }
+      // update progress bar
+      const passElapsed = (performance.now() - looper.playStart) % looper.loopLength;
+      const pct = (passElapsed / looper.loopLength) * 100;
+      document.getElementById('looperProgress').style.width = pct + '%';
+      looper.rafId = requestAnimationFrame(tick);
+    };
+    looper.rafId = requestAnimationFrame(tick);
+  }
+
+  function refreshLooperUI() {
+    const btn = document.getElementById('looperBtn');
+    const stateEl = document.getElementById('looperState');
+    const lenEl = document.getElementById('looperLength');
+    const progEl = document.getElementById('looperProgress');
+    btn.classList.remove('recording', 'playing');
+    if (looper.state === 'idle') {
+      btn.textContent = '● REC';
+      stateEl.textContent = looper.events.length > 0 ? 'STOPPED' : 'IDLE';
+      lenEl.textContent = '—';
+      progEl.style.width = '0%';
+    } else if (looper.state === 'recording') {
+      btn.classList.add('recording');
+      btn.textContent = '■ STOP REC';
+      stateEl.textContent = 'RECORDING';
+      lenEl.textContent = `${looper.events.length} events`;
+      progEl.style.width = '0%';
+    } else if (looper.state === 'playing') {
+      btn.classList.add('playing');
+      btn.textContent = '■ STOP LOOP';
+      stateEl.textContent = 'LOOPING';
+      const effBpm = getActiveBpm();
+      if (effBpm) {
+        const beats = Math.round(looper.loopLength / (60000 / effBpm));
+        lenEl.textContent = `${beats} beats · ${(looper.loopLength / 1000).toFixed(1)}s`;
+      } else {
+        lenEl.textContent = `${(looper.loopLength / 1000).toFixed(1)}s`;
+      }
+    }
+  }
+
+  document.getElementById('looperBtn').addEventListener('click', looperToggle);
+  document.getElementById('looperClear').addEventListener('click', looperClear);
+
   // ===== KEYBOARD =====
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT') return;
@@ -1380,6 +1637,7 @@
     if (lower === 'b') { setActive('B'); refreshSyncDisplay(); return; }
     if (lower === 't') { tap(activeDeck); return; }
     if (lower === 's') { sync(activeDeck); return; }
+    if (lower === 'l') { looperToggle(); return; }
 
     for (const deck of ['A', 'B']) {
       const idx = CUE_KEYS[deck].indexOf(key);
@@ -1426,6 +1684,7 @@
   refreshCueButtons('B');
   renderQueue('A');
   renderQueue('B');
+  refreshLooperUI();
 </script>
 
 </body>
