@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>YT/DJ — Dual Deck v0.4</title>
+<title>YT/DJ — Dual Deck v0.5</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=VT323&family=Major+Mono+Display&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -764,7 +764,7 @@
 
 <div class="header">
   <div>
-    <div class="logo">YT<span class="slash">/</span>DJ<span class="accent">.</span><span class="version">v0.4</span></div>
+    <div class="logo">YT<span class="slash">/</span>DJ<span class="accent">.</span><span class="version">v0.5</span></div>
     <div class="tagline">DUAL DECK · QUEUES · HOT CUES · SYNC · TAP BPM · LOOPER</div>
   </div>
   <button class="help-toggle" id="helpToggle">SHOW KEYS</button>
@@ -1525,9 +1525,28 @@
   function recordCueIfNeeded(deck, slot) {
     if (looper.state !== 'recording') return;
     looper.events.push({
+      type: 'cue',
       time: performance.now() - looper.recordStart,
       deck, slot
     });
+  }
+
+  function recordSeekIfNeeded(deck, pct) {
+    if (looper.state !== 'recording') return;
+    looper.events.push({
+      type: 'seek',
+      time: performance.now() - looper.recordStart,
+      deck, pct
+    });
+  }
+
+  function performSeek(deck, pct, fromLooper = false) {
+    const p = players[deck];
+    if (!p || !p.getDuration) return;
+    const dur = p.getDuration();
+    if (!dur || !isFinite(dur)) return;
+    p.seekTo(dur * pct, true);
+    if (!fromLooper) recordSeekIfNeeded(deck, pct);
   }
 
   function runLooperPlayback() {
@@ -1540,7 +1559,11 @@
         looper.events[looper.nextEventIdx].time <= elapsed
       ) {
         const ev = looper.events[looper.nextEventIdx];
-        jumpCue(ev.deck, ev.slot, true);
+        if (ev.type === 'cue') {
+          jumpCue(ev.deck, ev.slot, true);
+        } else if (ev.type === 'seek') {
+          performSeek(ev.deck, ev.pct, true);
+        }
         looper.nextEventIdx++;
       }
       // wrap loop
@@ -1615,11 +1638,7 @@
     }
 
     if (/^[0-9]$/.test(key)) {
-      const p = players[activeDeck];
-      if (p && p.getDuration) {
-        const dur = p.getDuration();
-        p.seekTo(dur * (parseInt(key, 10) / 10), true);
-      }
+      performSeek(activeDeck, parseInt(key, 10) / 10);
       e.preventDefault();
       return;
     }
